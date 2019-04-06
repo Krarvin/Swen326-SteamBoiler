@@ -119,13 +119,10 @@ public class MySteamBoilerController implements SteamBoilerController {
 
 		//Normal Mode
 		else if(this.mode == State.NORMAL) {
-
-
-			if(configuration.getMinimalNormalLevel() > predictNextLmin(pumps, L, c, w, S)) {
-				pumps = pumps + 2;
-				openPumps(pumps,outgoing);
-			}else if(configuration.getMaximalNormalLevel() >  predictNextLmin(pumps, L, c, w, S)) {
-				outgoing.send(new Message(MessageKind.CLOSE_PUMP_n, 1));
+			if(configuration.getMinimalNormalLevel() >= predictNextLmin(pumps, L, c, w, S)) {
+				openPumps(predictPumps(L,c,w,S,configuration.getMinimalNormalLevel(),configuration.getMaximalNormalLevel()),outgoing);
+			}else if(configuration.getMaximalNormalLevel() >=  predictNextLmax(pumps, L, c, w, S)) {
+				openPumps(predictPumps(L,c,w,S,configuration.getMinimalNormalLevel(),configuration.getMaximalNormalLevel()),outgoing);
 			}
 		}
 
@@ -142,6 +139,25 @@ public class MySteamBoilerController implements SteamBoilerController {
 		for(int i = open; i < pumps; i= i+1) {
 			outgoing.send(new Message(MessageKind.OPEN_PUMP_n,i));
 		}
+		for(int i = pumps; i < 4; i=i+1) {
+			outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
+		}
+	}
+
+
+
+
+
+	public int predictPumps( double L, double c, double w, double s, double normalmin, double normalmax) {
+		int count = 0;
+		for(int i = count; i < 4; i = i+1) {
+			if(predictNextLmax(i,L,c,w,s) > normalmin) {
+				return i+1;
+			}else if(predictNextLmin(i,L,c,w,s) > normalmax) {
+				return i+1;
+			}
+		}
+		return count;
 	}
 
 
