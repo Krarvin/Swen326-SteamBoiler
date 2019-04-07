@@ -1,5 +1,7 @@
 package steam.boiler.core;
 
+import java.util.ArrayList;
+
 import org.eclipse.jdt.annotation.NonNull;
 import org.eclipse.jdt.annotation.Nullable;
 
@@ -76,7 +78,7 @@ public class MySteamBoilerController implements SteamBoilerController {
 		double L = levelMessage.getDoubleParameter();
 		double S = steamMessage.getDoubleParameter();
 		int pumps = 1;
-		double c = getCapacity(pumpStateMessages);
+		double c = configuration.getPumpCapacity(0);
 		double w = configuration.getMaximualSteamRate();
 
 		if (transmissionFailure(levelMessage, steamMessage, pumpStateMessages, pumpControlStateMessages)) {
@@ -92,38 +94,39 @@ public class MySteamBoilerController implements SteamBoilerController {
 
 		else if(this.mode == State.WAITING) {
 			outgoing.send(new Message(MessageKind.MODE_m,Mode.INITIALISATION));
+
 			if(extractOnlyMatch(MessageKind.STEAM_BOILER_WAITING, incoming) != null) {
+
 				if(steamMessage.getDoubleParameter() != 0) {
 					this.mode = State.EMERGENCY_STOP;
 				}
-				else if(steamMessage.getDoubleParameter() == 0) {
-					if(levelMessage.getDoubleParameter() > configuration.getMaximalNormalLevel()) {
+
+				if(steamMessage.getDoubleParameter() == 0) {
+					if(levelMessage.getDoubleParameter() >= configuration.getMinimalNormalLevel() && levelMessage.getDoubleParameter() <= configuration.getMaximalNormalLevel()) {
+						/*						outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,1));*/
+						outgoing.send(new Message(MessageKind.PROGRAM_READY));
+					}
+					else if(levelMessage.getDoubleParameter() >= configuration.getMaximalNormalLevel()) {
 						outgoing.send(new Message(MessageKind.VALVE));
-					}else if(levelMessage.getDoubleParameter() < average(configuration.getMinimalNormalLevel(), configuration.getMaximalNormalLevel())) {
-						outgoing.send(new Message(MessageKind.OPEN_PUMP_n,0));
-						if(configuration.getMinimalNormalLevel() > predictNextLmax(pumps,L,c,w,S)) {
-						outgoing.send(new Message(MessageKind.OPEN_PUMP_n,1));
-						}else {
-							outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,1));
+					}
+					if(levelMessage.getDoubleParameter() <= configuration.getMaximalLimitLevel()){
+						fillBoiler(outgoing);
 						}
 					}
 				}
-
-				if(levelMessage.getDoubleParameter() >= configuration.getMinimalNormalLevel() && levelMessage.getDoubleParameter() <= configuration.getMaximalNormalLevel()) {
-		/*						outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,1));*/
-					outgoing.send(new Message(MessageKind.PROGRAM_READY));
-
-				}
 			}
-		}
+
+
+
+
 
 		//Normal Mode
 		else if(this.mode == State.NORMAL) {
-			if(configuration.getMinimalNormalLevel() >= predictNextLmin(pumps, L, c, w, S)) {
-				openPumps(predictPumps(L,c,w,S,configuration.getMinimalNormalLevel(),configuration.getMaximalNormalLevel()),outgoing);
-			}else if(configuration.getMaximalNormalLevel() >=  predictNextLmax(pumps, L, c, w, S)) {
-				openPumps(predictPumps(L,c,w,S,configuration.getMinimalNormalLevel(),configuration.getMaximalNormalLevel()),outgoing);
-			}
+			openPumps(predictPumps(L,c,w,S,configuration.getMinimalNormalLevel(),configuration.getMaximalNormalLevel()),outgoing);
+		}
+
+		else if(this.mode == State.DEGRADED) {
+
 		}
 
 
@@ -133,14 +136,33 @@ public class MySteamBoilerController implements SteamBoilerController {
 
 		// NOTE: this is an example message send to illustrate the syntax
 	}
-
-	public void openPumps(int pumps, Mailbox outgoing) {
+	public void fillBoiler(Mailbox outgoing) {
 		int open = 0;
-		for(int i = open; i < pumps; i= i+1) {
+		int numPumps = 2;
+		for(int i = open; i < numPumps; i = i+1) {
 			outgoing.send(new Message(MessageKind.OPEN_PUMP_n,i));
 		}
-		for(int i = pumps; i < 4; i=i+1) {
+	}
+
+	public void closePumps(Mailbox outgoing) {
+		int open = 0;
+		for(int i = open; i < configuration.getNumberOfPumps(); i = i+1) {
 			outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
+		}
+	}
+	public void openPumps(int pumps, Mailbox outgoing) {
+		if(pumps != 0){
+			int open = 0;
+			for(int i = open; i < pumps; i = i+1) {
+				outgoing.send(new Message(MessageKind.OPEN_PUMP_n,i));
+			}
+			for(int i = pumps; i <= configuration.getNumberOfPumps(); i=i+1) {
+				outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
+			}
+		}else {
+			for(int i = 0; i<configuration.getNumberOfPumps(); i= i+1) {
+				outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
+			}
 		}
 	}
 
@@ -150,14 +172,26 @@ public class MySteamBoilerController implements SteamBoilerController {
 
 	public int predictPumps( double L, double c, double w, double s, double normalmin, double normalmax) {
 		int count = 0;
-		for(int i = count; i < 4; i = i+1) {
-			if(predictNextLmax(i,L,c,w,s) > normalmin) {
-				return i+1;
-			}else if(predictNextLmin(i,L,c,w,s) > normalmax) {
-				return i+1;
+		double dist = 1000000;
+		for(int i = count; i <= configuration.getNumberOfPumps(); i = i+1) {
+			if(getDist(average(predictNextLmax(i,L,c,w,s), predictNextLmin(i,L,c,w,s)), average(normalmin,normalmax)) <= dist) {
+				dist = getDist(average(predictNextLmax(i,L,c,w,s), predictNextLmin(i,L,c,w,s)), average(normalmin,normalmax));
+				count = i;
 			}
 		}
+
 		return count;
+	}
+
+	private double getDist(double a, double b) {
+		double dist = 0;
+		if(a > b) {
+			dist = a-b;
+		}
+		if(b > a) {
+			dist = b-a;
+		}
+		return dist;
 	}
 
 
@@ -173,15 +207,26 @@ public class MySteamBoilerController implements SteamBoilerController {
 		return Lmin;
 
 }
-	private double getCapacity(Message[] pumps) {
-		double capacity = 0;
-		for(int i = (int)capacity; i < pumps.length; i= i+1) {
-			if(pumps[i].getBooleanParameter() == true) {
-				capacity = configuration.getPumpCapacity(i);
+
+	public int predictPumpsInit( double L, double c, double w, double s, double normalmin, double normalmax) {
+		int count = 0;
+		double dist = 1000000;
+		for(int i = count; i <= configuration.getNumberOfPumps(); i = i+1) {
+			if(getDist(average(predictNextLmax(i,L,c,w,s), predictNextInit(i,L,c,w,s)), average(normalmin,normalmax)) <= dist) {
+				dist = getDist(average(predictNextLmax(i,L,c,w,s), predictNextInit(i,L,c,w,s)), average(normalmin,normalmax));
+				System.out.println(i + " " + dist);
+				count = i;
 			}
 		}
-		return capacity;
+
+		return count;
 	}
+	private double predictNextInit(int pumps, double L, double c, double w, double s) {
+		double Lmin = L + (5 * c * pumps) - (5 * 0);
+		return Lmin;
+
+}
+
 
 	private double average(double a, double b) {
 		return (a+b) / 2;
