@@ -11,7 +11,9 @@ import steam.boiler.util.Mailbox.Mode;
 import steam.boiler.util.SteamBoilerCharacteristics;
 
 /**
- * Main class for SteamBoiler implementation.
+ * Main class for SteamBoiler implementation. Initialisation and normal mode work correctly,
+ * however rescue and degrade mode still have problems.
+ * not all tests pass.
  */
 
 public class MySteamBoilerController implements SteamBoilerController {
