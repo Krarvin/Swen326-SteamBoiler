@@ -10,11 +10,16 @@ import steam.boiler.util.SteamBoilerCharacteristics;
  * @author David J. Pearce
  *
  */
+
 public class Simulation {
-	public static void main(String[] args) {
-		// Begin the simulation by opening the characteristics selection dialog.
-		new SimulationCharacteristicsDialog((SteamBoilerCharacteristics cs) -> {
-			return new MySteamBoilerController(cs);
-		});
-	}
+  /**
+   * the main method.
+   * @param args main method.
+   */
+  public static void main(String[] args) {
+    // Begin the simulation by opening the characteristics selection dialog.
+    new SimulationCharacteristicsDialog((SteamBoilerCharacteristics cs) -> {
+      return new MySteamBoilerController(cs);
+    });
+  }
 }
