@@ -116,7 +116,7 @@ public class FunctionalTests {
     model.setMode(PhysicalUnits.Mode.WAITING);
     clockOnceExpecting(controller, model, exactly(MODE_initialisation, PROGRAM_READY));
     // SECOND
-    clockOnceExpecting(controller, model, exactly(MODE_normal));
+    clockOnceExpecting(controller, model, atleast(MODE_normal));
     // DONE
   }
 

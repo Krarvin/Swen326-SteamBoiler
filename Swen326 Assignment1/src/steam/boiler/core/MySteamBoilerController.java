@@ -7,312 +7,468 @@ import org.eclipse.jdt.annotation.Nullable;
 
 import steam.boiler.model.SteamBoilerController;
 import steam.boiler.util.Mailbox;
-import steam.boiler.util.SteamBoilerCharacteristics;
 import steam.boiler.util.Mailbox.Message;
 import steam.boiler.util.Mailbox.MessageKind;
 import steam.boiler.util.Mailbox.Mode;
+import steam.boiler.util.SteamBoilerCharacteristics;
+
 
 public class MySteamBoilerController implements SteamBoilerController {
 
-	/**
-	 * Captures the various modes in which the controller can operate
-	 *
-	 * @author David J. Pearce
-	 *
-	 */
-	private enum State {
-		WAITING, READY, NORMAL, DEGRADED, RESCUE, EMERGENCY_STOP
-	}
+  /**
+   * Captures the various modes in which the controller can operate.
+   *
+   * @author David J. Pearce
+   *
+   */
+  private enum State {
+    WAITING, READY, NORMAL, DEGRADED, RESCUE, EMERGENCY_STOP
+  }
 
-	/**
-	 * Records the configuration characteristics for the given boiler problem.
-	 */
-	private final SteamBoilerCharacteristics configuration;
+  /**
+   * Records the configuration characteristics for the given boiler problem.
+   */
+  private final SteamBoilerCharacteristics configuration;
 
-	/**
-	 * Identifies the current mode in which the controller is operating.
-	 */
-	private State mode = State.WAITING;
+  /**
+   * Identifies the current mode in which the controller is operating.
+   */
+  private State mode = State.WAITING;
 
-	/**
-	 * Construct a steam boiler controller for a given set of characteristics.
-	 *
-	 * @param configuration The boiler characteristics to be used.
-	 */
-	public MySteamBoilerController(SteamBoilerCharacteristics configuration) {
-		this.configuration = configuration;
-	}
+  /**
+   * Construct a steam boiler controller for a given set of characteristics.
+   *
+   * @param configuration
+   *          The boiler characteristics to be used.
+   */
+  public MySteamBoilerController(SteamBoilerCharacteristics configuration) {
+    this.configuration = configuration;
+  }
 
-	/**
-	 * This message is displayed in the simulation window, and enables a limited
-	 * form of debug output. The content of the message has no material effect on
-	 * the system, and can be whatever is desired. In principle, however, it should
-	 * display a useful message indicating the current state of the controller.
-	 *
-	 * @return
-	 */
-	@Override
-	public String getStatusMessage() {
-		return mode.toString();
-	}
+  /**
+   * This message is displayed in the simulation window, and enables a limited
+   * form of debug output. The content of the message has no material effect on
+   * the system, and can be whatever is desired. In principle, however, it should
+   * display a useful message indicating the current state of the controller.
+   *
+   * @return
+   */
+  @Override
+  public String getStatusMessage() {
+    return mode.toString();
+  }
 
-	/**
-	 * Process a clock signal which occurs every 5 seconds. This requires reading
-	 * the set of incoming messages from the physical units and producing a set of
-	 * output messages which are sent back to them.
-	 *
-	 * @param incoming The set of incoming messages from the physical units.
-	 * @param outgoing Messages generated during the execution of this method should
-	 *                 be written here.
-	 */
-	@Override
-	public void clock(Mailbox incoming, Mailbox outgoing) {
-
-
-		// Extract expected messages
-		Message levelMessage = extractOnlyMatch(MessageKind.LEVEL_v, incoming);
-		Message steamMessage = extractOnlyMatch(MessageKind.STEAM_v, incoming);
-		Message[] pumpStateMessages = extractAllMatches(MessageKind.PUMP_STATE_n_b, incoming);
-		Message[] pumpControlStateMessages = extractAllMatches(MessageKind.PUMP_CONTROL_STATE_n_b, incoming);
-		//
-		double L = levelMessage.getDoubleParameter();
-		double S = steamMessage.getDoubleParameter();
-		int pumps = 1;
-		double c = configuration.getPumpCapacity(0);
-		double w = configuration.getMaximualSteamRate();
-
-		if (transmissionFailure(levelMessage, steamMessage, pumpStateMessages, pumpControlStateMessages)) {
-			// Level and steam messages required, so emergency stop.
-			this.mode = State.EMERGENCY_STOP;
-		}
-		//
-		//Initialization.
-		if(extractOnlyMatch(MessageKind.PHYSICAL_UNITS_READY, incoming) != null) {
-			this.mode = State.NORMAL;
-			outgoing.send(new Message(MessageKind.MODE_m, Mode.NORMAL));
-			}
-
-		else if(this.mode == State.WAITING) {
-			outgoing.send(new Message(MessageKind.MODE_m,Mode.INITIALISATION));
-
-			if(extractOnlyMatch(MessageKind.STEAM_BOILER_WAITING, incoming) != null) {
-
-				if(steamMessage.getDoubleParameter() != 0) {
-					this.mode = State.EMERGENCY_STOP;
-				}
-
-				if(steamMessage.getDoubleParameter() == 0) {
-					if(levelMessage.getDoubleParameter() >= configuration.getMinimalNormalLevel() && levelMessage.getDoubleParameter() <= configuration.getMaximalNormalLevel()) {
-						/*						outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,1));*/
-						outgoing.send(new Message(MessageKind.PROGRAM_READY));
-					}
-					else if(levelMessage.getDoubleParameter() >= configuration.getMaximalNormalLevel()) {
-						outgoing.send(new Message(MessageKind.VALVE));
-					}
-					if(levelMessage.getDoubleParameter() <= configuration.getMaximalLimitLevel()){
-						fillBoiler(outgoing);
-						}
-					}
-				}
-			}
+  /**
+   * Process a clock signal which occurs every 5 seconds. This requires reading
+   * the set of incoming messages from the physical units and producing a set of
+   * output messages which are sent back to them.
+   *
+   * @param incoming
+   *          The set of incoming messages from the physical units.
+   * @param outgoing
+   *          Messages generated during the execution of this method should be
+   *          written here.
+   */
+  @Override
+  public void clock(Mailbox incoming, Mailbox outgoing) {
+    // Extract expected messages
+    Message levelMessage = extractOnlyMatch(MessageKind.LEVEL_v, incoming);
+    Message steamMessage = extractOnlyMatch(MessageKind.STEAM_v, incoming);
+    Message[] pumpStateMessages = extractAllMatches(MessageKind.PUMP_STATE_n_b, incoming);
+    Message[] pumpControlStateMessages = extractAllMatches(MessageKind
+        .PUMP_CONTROL_STATE_n_b, incoming);
+    //
+    if (transmissionFailure(levelMessage, steamMessage, pumpStateMessages,
+        pumpControlStateMessages)) {
+      // Level and steam messages required, so emergency stop.
+      this.mode = State.EMERGENCY_STOP;
+      outgoing.send(new Message(MessageKind.MODE_m, Mode.EMERGENCY_STOP));
+      return;
+    }
+    double l = levelMessage.getDoubleParameter();
+    double s = steamMessage.getDoubleParameter();
+    double c = configuration.getPumpCapacity(0);
+    double w = configuration.getMaximualSteamRate();
+    boolean[] pumpsOn = new boolean[configuration.getNumberOfPumps()];
 
 
 
+    if (checkPumpControllers(incoming,outgoing)
+        && extractOnlyMatch(MessageKind.PHYSICAL_UNITS_READY, incoming) == null) {
+      outgoing.send(new Message(MessageKind.MODE_m, Mode.DEGRADED));
+      this.mode = State.DEGRADED;
+    }
+    //
+    // Initialization.
+
+    if (this.mode == State.EMERGENCY_STOP) {
+      outgoing.send(new Message(MessageKind.MODE_m, Mode.EMERGENCY_STOP));
+    } else if (extractOnlyMatch(MessageKind.PHYSICAL_UNITS_READY, incoming) != null) {
+      this.mode = State.NORMAL;
+      outgoing.send(new Message(MessageKind.MODE_m, Mode.NORMAL));
+    } else if (this.mode == State.WAITING) {
+      outgoing.send(new Message(MessageKind.MODE_m, Mode.INITIALISATION));
+
+      if (extractOnlyMatch(MessageKind.STEAM_BOILER_WAITING, incoming) != null) {
+
+        if (steamMessage.getDoubleParameter() != 0) {
+          this.mode = State.EMERGENCY_STOP;
+        }
+
+        if (steamMessage.getDoubleParameter() == 0) {
+          if (levelMessage.getDoubleParameter() >= configuration.getMinimalNormalLevel()
+              && levelMessage.getDoubleParameter() <= configuration.getMaximalNormalLevel()) {
+            /* outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,1)); */
+            outgoing.send(new Message(MessageKind.PROGRAM_READY));
+          } else if (levelMessage.getDoubleParameter() >= configuration.getMaximalNormalLevel()) {
+            outgoing.send(new Message(MessageKind.VALVE));
+          } else if (levelMessage.getDoubleParameter() <= configuration.getMaximalLimitLevel()) {
+            fillBoiler(outgoing);
+          }
+        }
+      }
+    } else if (this.mode == State.NORMAL) {
+      if (checkPumpControllers(incoming,outgoing)) {
+        outgoing.send(new Message(MessageKind.MODE_m, Mode.DEGRADED));
+        this.mode = State.DEGRADED;
+      } else if (checkWaterLevel(l)) {
+        outgoing.send(new Message(MessageKind.MODE_m, Mode.EMERGENCY_STOP));
+        this.mode = State.EMERGENCY_STOP;
+      } else if (checkSteamRate(s)) {
+        outgoing.send(new Message(MessageKind.MODE_m, Mode.DEGRADED));
+        outgoing.send(new Message(MessageKind.STEAM_FAILURE_DETECTION));
+        this.mode = State.DEGRADED;
+      } else if (checkPumps(incoming,outgoing,pumpStateMessages)) {
+        outgoing.send(new Message(MessageKind.MODE_m, Mode.DEGRADED));
+        this.mode = State.DEGRADED;
+      } else {
+        openPumps(predictPumps(l, c, w, s, configuration.getMinimalNormalLevel(),
+            configuration.getMaximalNormalLevel()), outgoing, pumpsOn);
+      }
+    } else if (this.mode == State.DEGRADED) {
+
+      System.out.println("test degraded");
+      for (int i = 0; i < incoming.size(); i++) {
+        Message m = incoming.read(i);
+        if (m.getKind().equals(MessageKind.STEAM_REPAIRED)) {
+          outgoing.send(new Message(MessageKind.STEAM_REPAIRED_ACKNOWLEDGEMENT));
+          outgoing.send(new Message(MessageKind.MODE_m, Mode.NORMAL));
+          this.mode = State.NORMAL;
+        }  else if (m.getKind().equals(MessageKind.PUMP_CONTROL_REPAIRED_n)) {
+          outgoing.send(new Message(MessageKind.PUMP_CONTROL_FAILURE_ACKNOWLEDGEMENT_n,
+              m.getIntegerParameter()));
+          outgoing.send(new Message(MessageKind.MODE_m, Mode.NORMAL));
+          System.out.println("test");
+          this.mode = State.NORMAL;
+        }  else if (m.getKind().equals(MessageKind.PUMP_REPAIRED_n)) {
+          System.out.println("test");
+          outgoing.send(new Message(MessageKind.PUMP_REPAIRED_ACKNOWLEDGEMENT_n,
+              m.getIntegerParameter()));
+          outgoing.send(new Message(MessageKind.CLOSE_PUMP_n, m.getIntegerParameter()));
+          outgoing.send(new Message(MessageKind.MODE_m, Mode.NORMAL));
+          this.mode = State.NORMAL;
+        }
+      }
+    }
 
 
-		//Normal Mode
-		else if(this.mode == State.NORMAL) {
-			openPumps(predictPumps(L,c,w,S,configuration.getMinimalNormalLevel(),configuration.getMaximalNormalLevel()),outgoing);
-		}
-
-		else if(this.mode == State.DEGRADED) {
-
-		}
+    // NOTE: this is an example message send to illustrate the syntax
+  }
 
 
+  /**
+   * fills the boiler by opening pumps.
+   *
+   * @param outgoing
+   *          The set of incoming messages from the physical units.
+   */
 
+  public void fillBoiler(Mailbox outgoing) {
+    int open = 0;
+    int numPumps = 3;
+    for (int i = open; i < numPumps; i = i + 1) {
+      outgoing.send(new Message(MessageKind.OPEN_PUMP_n, i));
+    }
+  }
+  /**
+   * fills the boiler by opening pumps.
+   *
+   * @param outgoing
+   *     Messages generated during the execution of this method should be
+   *     written here.
+   */
 
-		// FIXME: this is where the main implementation stems from
+  public void closePumps(Mailbox outgoing) {
+    int open = 0;
+    for (int i = open; i < configuration.getNumberOfPumps(); i = i + 1) {
+      outgoing.send(new Message(MessageKind.CLOSE_PUMP_n, i));
+    }
+  }
+  /**
+   * opens the amount of pumps passed into the method. and closes the remaining pumps open
+   * @param pumps
+   *     the number of pumps to open.
+   * @param outgoing
+   * Messages generated during the execution of this method should be
+   *     written here.
+   */
 
-		// NOTE: this is an example message send to illustrate the syntax
-	}
-	public void fillBoiler(Mailbox outgoing) {
-		int open = 0;
-		int numPumps = 2;
-		for(int i = open; i < numPumps; i = i+1) {
-			outgoing.send(new Message(MessageKind.OPEN_PUMP_n,i));
-		}
-	}
+  public void openPumps(int pumps, Mailbox outgoing, boolean[] pumpsOn) {
+    if (pumps != 0) {
+      int open = 0;
+      for (int i = open; i < pumps; i = i + 1) {
+        outgoing.send(new Message(MessageKind.OPEN_PUMP_n, i));
+        pumpsOn[i] = true;
+      }
+      for (int i = pumps; i <= configuration.getNumberOfPumps(); i = i + 1) {
+        outgoing.send(new Message(MessageKind.CLOSE_PUMP_n, i));
+        if (i < configuration.getNumberOfPumps()) {
+          pumpsOn[i] = false;
+        }
+      }
+    } else {
+      for (int i = 0; i < configuration.getNumberOfPumps(); i = i + 1) {
+        outgoing.send(new Message(MessageKind.CLOSE_PUMP_n, i));
+        pumpsOn[i] = false;
+      }
+    }
+  }
+  /**
+   * predicts the amount of pumps the steam boiler should open for the next cycle.
+   *
+   * @param l
+   *   the current level of water.
+   * @param c
+   *   the capacity of a pump.
+   * @param w
+   *   the maximum steam rate.
+   * @param s
+   *   the current steam reading.
+   */
 
-	public void closePumps(Mailbox outgoing) {
-		int open = 0;
-		for(int i = open; i < configuration.getNumberOfPumps(); i = i+1) {
-			outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
-		}
-	}
-	public void openPumps(int pumps, Mailbox outgoing) {
-		if(pumps != 0){
-			int open = 0;
-			for(int i = open; i < pumps; i = i+1) {
-				outgoing.send(new Message(MessageKind.OPEN_PUMP_n,i));
-			}
-			for(int i = pumps; i <= configuration.getNumberOfPumps(); i=i+1) {
-				outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
-			}
-		}else {
-			for(int i = 0; i<configuration.getNumberOfPumps(); i= i+1) {
-				outgoing.send(new Message(MessageKind.CLOSE_PUMP_n,i));
-			}
-		}
-	}
+  public int predictPumps(double l, double c, double w, double s,
+      double normalmin, double normalmax) {
+    int count = 0;
+    double dist = 1000000;
+    for (int i = count; i <= configuration.getNumberOfPumps(); i = i + 1) {
+      if (getDist(average(predictNextLmax(i, l, c, w, s), predictNextLmin(i, l, c, w, s)),
+          average(normalmin, normalmax)) <= dist) {
+        dist = getDist(average(predictNextLmax(i, l, c, w, s), predictNextLmin(i, l, c, w, s)),
+            average(normalmin, normalmax));
+        count = i;
+      }
+    }
 
+    return count;
+  }
 
+  private boolean checkSteamRate(double steamRate) {
+    if (steamRate < 0 || steamRate > configuration.getMaximualSteamRate()) {
+      return true;
+    }
+    return false;
+  }
 
+  private boolean checkWaterLevel(double waterLevel) {
+    if (waterLevel < configuration.getMinimalLimitLevel()
+        || waterLevel > configuration.getMaximalLimitLevel()) {
+      return true;
+    }
+    return false;
+  }
 
+  private boolean checkPumpControllers(Mailbox incoming, Mailbox outgoing) {
+    for (int i = 0; i < incoming.size(); i++) {
+      Message tempPump = incoming.read(i);
+      if (tempPump.getKind().equals(MessageKind.PUMP_CONTROL_STATE_n_b)) {
+        int pumpNum = tempPump.getIntegerParameter();
+        boolean pumpOn = tempPump.getBooleanParameter();
+        for (int j = 0; j < incoming.size();j++) {
+          Message tempCont = incoming.read(j);
+          if (tempCont.getKind().equals(MessageKind.PUMP_CONTROL_STATE_n_b)) {
+            int contNum = tempCont.getIntegerParameter();
+            boolean contOn = tempCont.getBooleanParameter();
+            if (pumpNum == contNum && (pumpOn != contOn)) {
+              outgoing.send(new Message(MessageKind.PUMP_CONTROL_FAILURE_DETECTION_n,contNum));
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
 
-	public int predictPumps( double L, double c, double w, double s, double normalmin, double normalmax) {
-		int count = 0;
-		double dist = 1000000;
-		for(int i = count; i <= configuration.getNumberOfPumps(); i = i+1) {
-			if(getDist(average(predictNextLmax(i,L,c,w,s), predictNextLmin(i,L,c,w,s)), average(normalmin,normalmax)) <= dist) {
-				dist = getDist(average(predictNextLmax(i,L,c,w,s), predictNextLmin(i,L,c,w,s)), average(normalmin,normalmax));
-				count = i;
-			}
-		}
+  private boolean checkPumps(Mailbox incoming, Mailbox outgoing, Message[] pumps) {
+    boolean[] pumpsOn = new boolean[pumps.length];
+    for (int i = 0; i < pumps.length;i++) {
+      pumpsOn[i] = pumps[i].getBooleanParameter();
+    }
+    for (int i = 0; i < incoming.size(); i++) {
+      Message m = incoming.read(i);
+      if (m.getKind().equals(MessageKind.PUMP_STATE_n_b)) {
+        if (pumps[m.getIntegerParameter()].getBooleanParameter() != m.getBooleanParameter()) {
+          pumpsOn[m.getIntegerParameter()] = false;
+          outgoing.send(new Message(MessageKind.PUMP_FAILURE_DETECTION_n,
+              m.getIntegerParameter()));
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
-		return count;
-	}
+  private double getDist(double a, double b) {
+    double dist = 0;
+    if (a > b) {
+      dist = a - b;
+    }
+    if (b > a) {
+      dist = b - a;
+    }
+    return dist;
+  }
 
-	private double getDist(double a, double b) {
-		double dist = 0;
-		if(a > b) {
-			dist = a-b;
-		}
-		if(b > a) {
-			dist = b-a;
-		}
-		return dist;
-	}
+  private double predictNextLmax(int pumps, double l, double c, double w, double s) {
+    double lmax = l + (5 * c * pumps) - (5 * s);
+    return lmax;
 
+  }
 
+  private double predictNextLmin(int pumps, double l, double c, double w, double s) {
+    double lmin = l + (5 * c * pumps) - (5 * w);
+    return lmin;
 
-	private double predictNextLmax(int pumps, double L, double c, double w, double s) {
-			double Lmax = L + (5 * c * pumps) - (5 * s);
-			return Lmax;
+  }
+  /**
+   * predicts the amount of pumps the steam boiler should open for intialization.
+   *
+   * @param l
+   *   the current level of water.
+   * @param c
+   *   the capacity of a pump.
+   * @param w
+   *   the maximum steam rate.
+   * @param s
+   *   the current steam reading.
+   */
 
-	}
+  public int predictPumpsInit(double l, double c, double w, double s, double min, double max) {
+    int count = 0;
+    double dist = 1000000;
+    for (int i = count; i <= configuration.getNumberOfPumps(); i = i + 1) {
+      if (getDist(average(predictNextLmax(i, l, c, w, s), predictNextInit(i, l, c, w, s)),
+          average(min, max)) <= dist) {
+        dist = getDist(average(predictNextLmax(i, l, c, w, s), predictNextInit(i, l, c, w, s)),
+            average(min, max));
+        System.out.println(i + " " + dist);
+        count = i;
+      }
+    }
 
-	private double predictNextLmin(int pumps, double L, double c, double w, double s) {
-		double Lmin = L + (5 * c * pumps) - (5 * w);
-		return Lmin;
+    return count;
+  }
 
+  private double predictNextInit(int pumps, double l, double c, double w, double s) {
+    double lmin = l + (5 * c * pumps) - (5 * 0);
+    return lmin;
+
+  }
+
+  private double average(double a, double b) {
+    return (a + b) / 2;
+  }
+
+  /**
+   * Check whether there was a transmission failure. This is indicated in several
+   * ways. Firstly, when one of the required messages is missing. Secondly, when
+   * the values returned in the messages are nonsensical.
+   *
+   * @param levelMessage
+   *          Extracted LEVEL_v message.
+   * @param steamMessage
+   *          Extracted STEAM_v message.
+   * @param pumpStates
+   *          Extracted PUMP_STATE_n_b messages.
+   * @param pumpControlStates
+   *          Extracted PUMP_CONTROL_STATE_n_b messages.
+   * @return
+   */
+  private boolean transmissionFailure(Message levelMessage,Message steamMessage,
+      Message[] pumpStates, Message[] pumpControlStates) {
+    // Check level readings
+    if (levelMessage == null) {
+      // Nonsense or missing level reading
+      return true;
+    } else if (steamMessage == null) {
+      // Nonsense or missing steam reading
+      return true;
+    } else if (pumpStates.length != configuration.getNumberOfPumps()) {
+      // Nonsense pump state readings
+      return true;
+    } else if (pumpControlStates.length != configuration.getNumberOfPumps()) {
+      // Nonsense pump control state readings
+      return true;
+    }
+    // Done
+    return false;
+  }
+
+  /**
+   * Find and extract a message of a given kind in a mailbox. This must the only
+   * match in the mailbox, else <code>null</code> is returned.
+   *
+   * @param kind
+   *          The kind of message to look for.
+   * @param incoming
+   *          The mailbox to search through.
+   * @return The matching message, or <code>null</code> if there was not exactly
+   *         one match.
+   */
+  private static Message extractOnlyMatch(MessageKind kind, Mailbox incoming) {
+    Message match = null;
+    for (int i = 0; i != incoming.size(); ++i) {
+      Message ith = incoming.read(i);
+      if (ith.getKind() == kind) {
+        if (match == null) {
+          match = ith;
+        } else {
+          // This indicates that we matched more than one message of the given kind.
+          return null;
+        }
+      }
+    }
+    return match;
+  }
+
+  /**
+   * Find and extract all messages of a given kind.
+   *
+   * @param kind
+   *          The kind of message to look for.
+   * @param incoming
+   *          The mailbox to search through.
+   * @return The array of matches, which can empty if there were none.
+   */
+  private static Message[] extractAllMatches(MessageKind kind, Mailbox incoming) {
+    int count = 0;
+    // Count the number of matches
+    for (int i = 0; i != incoming.size(); ++i) {
+      Message ith = incoming.read(i);
+      if (ith.getKind() == kind) {
+        count = count + 1;
+      }
+    }
+    // Now, construct resulting array
+    Message[] matches = new Message[count];
+    int index = 0;
+    for (int i = 0; i != incoming.size(); ++i) {
+      Message ith = incoming.read(i);
+      if (ith.getKind() == kind) {
+        matches[index++] = ith;
+      }
+    }
+    return matches;
+  }
 }
 
-	public int predictPumpsInit( double L, double c, double w, double s, double normalmin, double normalmax) {
-		int count = 0;
-		double dist = 1000000;
-		for(int i = count; i <= configuration.getNumberOfPumps(); i = i+1) {
-			if(getDist(average(predictNextLmax(i,L,c,w,s), predictNextInit(i,L,c,w,s)), average(normalmin,normalmax)) <= dist) {
-				dist = getDist(average(predictNextLmax(i,L,c,w,s), predictNextInit(i,L,c,w,s)), average(normalmin,normalmax));
-				System.out.println(i + " " + dist);
-				count = i;
-			}
-		}
-
-		return count;
-	}
-	private double predictNextInit(int pumps, double L, double c, double w, double s) {
-		double Lmin = L + (5 * c * pumps) - (5 * 0);
-		return Lmin;
-
-}
-
-
-	private double average(double a, double b) {
-		return (a+b) / 2;
-	}
-
-	/**
-	 * Check whether there was a transmission failure. This is indicated in several
-	 * ways. Firstly, when one of the required messages is missing. Secondly, when
-	 * the values returned in the messages are nonsensical.
-	 *
-	 * @param levelMessage      Extracted LEVEL_v message.
-	 * @param steamMessage      Extracted STEAM_v message.
-	 * @param pumpStates        Extracted PUMP_STATE_n_b messages.
-	 * @param pumpControlStates Extracted PUMP_CONTROL_STATE_n_b messages.
-	 * @return
-	 */
-	private boolean transmissionFailure(Message levelMessage, Message steamMessage, Message[] pumpStates,
-			Message[] pumpControlStates) {
-		// Check level readings
-		if (levelMessage == null) {
-			// Nonsense or missing level reading
-			return true;
-		} else if (steamMessage == null) {
-			// Nonsense or missing steam reading
-			return true;
-		} else if (pumpStates.length != configuration.getNumberOfPumps()) {
-			// Nonsense pump state readings
-			return true;
-		} else if (pumpControlStates.length != configuration.getNumberOfPumps()) {
-			// Nonsense pump control state readings
-			return true;
-		}
-		// Done
-		return false;
-	}
-
-	/**
-	 * Find and extract a message of a given kind in a mailbox. This must the only
-	 * match in the mailbox, else <code>null</code> is returned.
-	 *
-	 * @param kind     The kind of message to look for.
-	 * @param incoming The mailbox to search through.
-	 * @return The matching message, or <code>null</code> if there was not exactly
-	 *         one match.
-	 */
-	private static Message extractOnlyMatch(MessageKind kind, Mailbox incoming) {
-		Message match = null;
-		for (int i = 0; i != incoming.size(); ++i) {
-			Message ith = incoming.read(i);
-			if (ith.getKind() == kind) {
-				if (match == null) {
-					match = ith;
-				} else {
-					// This indicates that we matched more than one message of the given kind.
-					return null;
-				}
-			}
-		}
-		return match;
-	}
-
-	/**
-	 * Find and extract all messages of a given kind.
-	 *
-	 * @param kind     The kind of message to look for.
-	 * @param incoming The mailbox to search through.
-	 * @return The array of matches, which can empty if there were none.
-	 */
-	private static Message[] extractAllMatches(MessageKind kind, Mailbox incoming) {
-		int count = 0;
-		// Count the number of matches
-		for (int i = 0; i != incoming.size(); ++i) {
-			Message ith = incoming.read(i);
-			if (ith.getKind() == kind) {
-				count = count + 1;
-			}
-		}
-		// Now, construct resulting array
-		Message[] matches = new Message[count];
-		int index = 0;
-		for (int i = 0; i != incoming.size(); ++i) {
-			Message ith = incoming.read(i);
-			if (ith.getKind() == kind) {
-				matches[index++] = ith;
-			}
-		}
-		return matches;
-	}
-}
